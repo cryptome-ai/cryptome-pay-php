@@ -86,7 +86,13 @@ class Client
         ?string $redirectUrl = null,
         string $chainType = ChainType::TRC20
     ): array {
+        $timestamp = (string) time();
+        $nonce = $this->generateNonce();
+
         $params = [
+            'api_key' => $this->apiKey,
+            'timestamp' => $timestamp,
+            'nonce' => $nonce,
             'order_id' => $orderId,
             'amount' => number_format($amount, 2, '.', ''),
             'notify_url' => $notifyUrl,
@@ -201,11 +207,11 @@ class Client
     }
 
     /**
-     * Generate MD5 signature for parameters.
+     * Generate HMAC-SHA256 signature for parameters.
      *
      * @param array $params Parameters to sign
      *
-     * @return string MD5 signature
+     * @return string HMAC-SHA256 signature (64 hex characters)
      */
     public function generateSignature(array $params): string
     {
@@ -223,8 +229,18 @@ class Client
         // Build query string
         $queryString = http_build_query($filtered);
 
-        // Append secret and generate MD5
-        return md5($queryString . $this->apiSecret);
+        // Generate HMAC-SHA256
+        return hash_hmac('sha256', $queryString, $this->apiSecret);
+    }
+
+    /**
+     * Generate a random nonce string.
+     *
+     * @return string 32-character hex string
+     */
+    private function generateNonce(): string
+    {
+        return bin2hex(random_bytes(16));
     }
 
     /**
