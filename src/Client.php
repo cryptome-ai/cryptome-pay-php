@@ -118,7 +118,7 @@ class Client
      */
     public function queryPaymentByTradeId(string $tradeId): array
     {
-        return $this->request('GET', '/order/query', ['trade_id' => $tradeId]);
+        return $this->request('GET', '/merchant/order/query', ['trade_id' => $tradeId]);
     }
 
     /**
@@ -131,7 +131,7 @@ class Client
      */
     public function queryPaymentByOrderId(string $orderId): array
     {
-        return $this->request('GET', '/order/query', ['order_id' => $orderId]);
+        return $this->request('GET', '/merchant/order/query', ['order_id' => $orderId]);
     }
 
     /**
@@ -188,7 +188,7 @@ class Client
     }
 
     /**
-     * Verify webhook signature.
+     * Verify webhook signature (supports both SHA256 and legacy MD5).
      *
      * @param array $payload The webhook payload
      *
@@ -201,9 +201,60 @@ class Client
         }
 
         $receivedSignature = $payload['signature'];
-        $expectedSignature = $this->generateSignature($payload);
+        $signatureVersion = isset($payload['signature_version']) ? (int)$payload['signature_version'] : 1;
 
-        return hash_equals($expectedSignature, $receivedSignature);
+        // Clone and filter params
+        $params = [];
+        foreach ($payload as $key => $value) {
+            if ($key === 'signature' || $key === 'signature_version') {
+                continue;
+            }
+            if ($value === '' || $value === null) {
+                continue;
+            }
+            // Format numbers correctly
+            if ($key === 'amount' && is_numeric($value)) {
+                $params[$key] = sprintf('%.2f', (float)$value);
+            } elseif ($key === 'actual_amount' && is_numeric($value)) {
+                $params[$key] = sprintf('%.4f', (float)$value);
+            } else {
+                $params[$key] = (string)$value;
+            }
+        }
+
+        $expectedSignature = $this->calculateSignature($params, $signatureVersion);
+
+        return hash_equals(strtolower($expectedSignature), strtolower($receivedSignature));
+    }
+
+    /**
+     * Calculate signature based on version.
+     *
+     * @param array $params Parameters to sign
+     * @param int   $version Signature version (1=MD5, 2=SHA256)
+     *
+     * @return string Signature
+     */
+    private function calculateSignature(array $params, int $version): string
+    {
+        // Filter out empty values and signature fields
+        $filtered = array_filter($params, function ($value, $key) {
+            return $key !== 'signature' && $key !== 'signature_version' && $value !== '' && $value !== null;
+        }, ARRAY_FILTER_USE_BOTH);
+
+        // Sort by key
+        ksort($filtered);
+
+        // Build query string
+        $queryString = http_build_query($filtered);
+
+        if ($version === 2) {
+            // HMAC-SHA256 (recommended)
+            return hash_hmac('sha256', $queryString, $this->apiSecret);
+        }
+
+        // Legacy MD5 (deprecated)
+        return md5($queryString . $this->apiSecret);
     }
 
     /**
